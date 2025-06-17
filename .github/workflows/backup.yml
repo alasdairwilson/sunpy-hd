@@ -1,0 +1,58 @@
+name: Supabase DB Backup to Backblaze + GitHub
+
+on:
+  schedule:
+    - cron: '30 2 * * *' # Daily at 02:30 UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Dump Supabase DB
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_DB: ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER: ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+        run: |
+          export PGPASSWORD=$SUPABASE_PASSWORD
+          pg_dump --no-owner --clean --if-exists \
+            -h "$SUPABASE_URL" -p 5432 -U "$SUPABASE_USER" -d "$SUPABASE_DB" \
+            -F c -f supabase-backup-$(date +%F).dump
+
+      - name: Install rclone
+        run: curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "[b2]" >> ~/.config/rclone/rclone.conf
+          echo "type = s3" >> ~/.config/rclone/rclone.conf
+          echo "provider = Other" >> ~/.config/rclone/rclone.conf
+          echo "access_key_id = ${{ secrets.B2_ACCOUNT_ID }}" >> ~/.config/rclone/rclone.conf
+          echo "secret_access_key = ${{ secrets.B2_ACCOUNT_KEY }}" >> ~/.config/rclone/rclone.conf
+          echo "endpoint = https://${{ secrets.B2_ENDPOINT }}" >> ~/.config/rclone/rclone.conf
+          echo "region = eu-central-003" >> ~/.config/rclone/rclone.conf
+          echo "acl = private" >> ~/.config/rclone/rclone.conf
+
+      - name: Upload backup to Backblaze B2
+        run: |
+          rclone copy supabase-backup-*.dump b2:${{ secrets.B2_BUCKET }}/supabase-backups/
+
+      - name: Upload backup as GitHub artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: supabase-backup
+          path: supabase-backup-*.dump
+          retention-days: 7
+
+      - name: Clean up local dump
+        run: rm -f supabase-backup-*.dump
