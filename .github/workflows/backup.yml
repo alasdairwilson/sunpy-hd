@@ -62,7 +62,7 @@ jobs:
             rclone copy supabase-backup-*.dump b2:${{ secrets.B2_BUCKET }}/supabase-backups --s3-no-check-bucket
 
       - name: Upload backup as GitHub artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: supabase-backup
           path: supabase-backup-*.dump
