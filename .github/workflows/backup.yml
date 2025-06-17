@@ -13,8 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL 17 client
+        run: |
+            sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+            wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client-17
 
       - name: Dump Supabase DB
         env:
@@ -24,35 +28,45 @@ jobs:
           SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
         run: |
           export PGPASSWORD=$SUPABASE_PASSWORD
-          pg_dump --no-owner --clean --if-exists \
-            -h "$SUPABASE_URL" -p 5432 -U "$SUPABASE_USER" -d "$SUPABASE_DB" \
-            -F c -f supabase-backup-$(date +%F).dump
+            pg_dump \
+            --no-owner --clean --if-exists \
+            -h "${SUPABASE_URL}" \
+            -p 5432 \
+            -U "${SUPABASE_USER}" \
+            -d "${SUPABASE_DB}" \
+            -F c \
+            -f "supabase-backup-$(date +%F).dump"
 
       - name: Install rclone
         run: curl https://rclone.org/install.sh | sudo bash
+    
 
       - name: Configure rclone
         run: |
-          mkdir -p ~/.config/rclone
-          echo "[b2]" >> ~/.config/rclone/rclone.conf
-          echo "type = s3" >> ~/.config/rclone/rclone.conf
-          echo "provider = Other" >> ~/.config/rclone/rclone.conf
-          echo "access_key_id = ${{ secrets.B2_ACCOUNT_ID }}" >> ~/.config/rclone/rclone.conf
-          echo "secret_access_key = ${{ secrets.B2_ACCOUNT_KEY }}" >> ~/.config/rclone/rclone.conf
-          echo "endpoint = https://${{ secrets.B2_ENDPOINT }}" >> ~/.config/rclone/rclone.conf
-          echo "region = eu-central-003" >> ~/.config/rclone/rclone.conf
-          echo "acl = private" >> ~/.config/rclone/rclone.conf
+            mkdir -p ~/.config/rclone
+            echo "[b2]" >> ~/.config/rclone/rclone.conf
+            echo "type = s3" >> ~/.config/rclone/rclone.conf
+            echo "provider = Other" >> ~/.config/rclone/rclone.conf
+            echo "access_key_id = ${{ secrets.B2_ACCOUNT_ID }}" >> ~/.config/rclone/rclone.conf
+            echo "secret_access_key = ${{ secrets.B2_ACCOUNT_KEY }}" >> ~/.config/rclone/rclone.conf
+            echo "endpoint = https://${{ secrets.B2_ENDPOINT }}" >> ~/.config/rclone/rclone.conf
+            echo "bucket = ${{ secrets.B2_BUCKET }}" >> ~/.config/rclone/rclone.conf
+            echo "region = eu-central-003" >> ~/.config/rclone/rclone.conf
+            echo "acl = private" >> ~/.config/rclone/rclone.conf
+    
+      - name: test rclone configuration
+        run: rclone lsjson b2:${{ secrets.B2_BUCKET }}
 
       - name: Upload backup to Backblaze B2
         run: |
-          rclone copy supabase-backup-*.dump b2:${{ secrets.B2_BUCKET }}/supabase-backups/
+            rclone copy supabase-backup-*.dump b2:${{ secrets.B2_BUCKET }}/supabase-backups --s3-no-check-bucket
 
       - name: Upload backup as GitHub artifact
         uses: actions/upload-artifact@v3
         with:
           name: supabase-backup
           path: supabase-backup-*.dump
-          retention-days: 7
+          retention-days: 90
 
       - name: Clean up local dump
         run: rm -f supabase-backup-*.dump
